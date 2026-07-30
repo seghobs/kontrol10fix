@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Cache Devre Disi: Chrome, Safari, Firefox hicbir sayfayi hatirlamamali -->
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Admin Panel - Çoklu Token Yönetimi</title>
+    <link href="https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v={{ range(1, 99999) | random }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile-nav.css') }}?v={{ range(1, 99999) | random }}">
+
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <script>
+        const originalFetch = window.fetch;
+        window.fetch = function(input, init) {
+            if (init && init.method && init.method.toUpperCase() === 'POST') {
+                const meta = document.querySelector('meta[name="csrf-token"]');
+                if (meta) {
+                    const csrfToken = meta.getAttribute('content');
+                    init.headers = init.headers || {};
+                    if (init.headers instanceof Headers) {
+                        init.headers.set('X-CSRFToken', csrfToken);
+                    } else if (Array.isArray(init.headers)) {
+                        const idx = init.headers.findIndex(([k]) => k.toLowerCase() === 'x-csrftoken');
+                        if (idx !== -1) init.headers[idx][1] = csrfToken;
+                        else init.headers.push(['X-CSRFToken', csrfToken]);
+                    } else {
+                        init.headers['X-CSRFToken'] = csrfToken;
+                    }
+                }
+            }
+            if (init === undefined) {
+                return originalFetch(input);
+            }
+            return originalFetch(input, init);
+        };
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-shield-alt"></i> Token Yönetim Paneli</h1>
+            <a href="/admin/logout" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Çıkış Yap</a>
+        </div>
+
+        <div id="statsStrip" class="stats-strip">
+            <span onclick="scrollToAndHighlightTokens('all')" style="cursor: pointer;" title="Tüm tokenları göster"><i class="fas fa-database"></i> Toplam: <strong id="statTotal">0</strong></span>
+            <span onclick="scrollToAndHighlightTokens('active')" style="cursor: pointer;" title="Aktif tokenları göster"><i class="fas fa-check-circle"></i> Aktif: <strong id="statActive">0</strong></span>
+            <span onclick="scrollToAndHighlightTokens('inactive')" style="cursor: pointer;" title="Pasif tokenları göster"><i class="fas fa-pause-circle"></i> Pasif: <strong id="statInactive">0</strong></span>
+            <span onclick="scrollToAndHighlightTokens('deleted')" style="cursor: pointer;" title="Silinen tokenları göster"><i class="fas fa-trash"></i> Silinen: <strong id="statDeleted">0</strong></span>
+            <span><i class="fas fa-sync-alt"></i> Son 7 gün relogin: <strong id="statRelogin">0</strong></span>
+        </div>
+        
+        <div id="alertContainer"></div>
+        
+        <div class="add-token-section" id="addTokenSection">
+            <div class="section-header" id="addTokenHeader" onclick="toggleAddTokenPanel()" style="cursor: pointer;">
+                <h2><i class="fas fa-plus-circle"></i> Yeni Token Ekle</h2>
+                <i class="fas fa-chevron-down chevron-icon" id="addTokenChevron"></i>
+            </div>
+
+            <div id="addTokenBody" class="section-body collapsed">
+                <p style="color: rgba(255, 255, 255, 0.7); font-size: 14px; margin-bottom: 15px;">
+                    <i class="fas fa-info-circle"></i> Token girildiğinde hangi hesaba ait olduğu otomatik algılanacaktır.
+                </p>
+                <form id="addTokenForm">
+                    <div class="form-group">
+                        <label for="token"><i class="fas fa-key"></i> Token (Bearer Token)</label>
+                        <textarea id="token" name="token" required placeholder="Bearer IGT:2:..."></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="android_id"><i class="fas fa-mobile-alt"></i> Android ID</label>
+                        <input type="text" id="android_id" name="android_id" required placeholder="3724108ca33e7977">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="device_id"><i class="fas fa-fingerprint"></i> Device ID</label>
+                        <input type="text" id="device_id" name="device_id" required placeholder="550e8400-e29b-41d4-a716-446655440000">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="user_agent"><i class="fas fa-browser"></i> User Agent</label>
+                        <textarea id="user_agent" name="user_agent" required placeholder="Instagram 321.0.0.34.111..."></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="password"><i class="fas fa-lock"></i> Şifre</label>
+                        <input type="password" id="password" name="password" required placeholder="Şifrenizi girin">
+                        <small style="color: rgba(255, 255, 255, 0.5); font-size: 12px; display: block; margin-top: 5px;">
+                            <i class="fas fa-info-circle"></i> Kullanıcı adı, şifre, android id, device id ve user agent alanlari zorunludur.
+                        </small>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <button type="submit" class="btn"><i class="fas fa-save"></i> Token Ekle</button>
+                        <button type="button" class="btn" style="background: rgba(46, 204, 113, 0.2); border-color: rgba(46, 204, 113, 0.4); color: #2ecc71;" onclick="document.getElementById('importJsonInput').click()"><i class="fas fa-upload"></i> JSON'dan İçeri Aktar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="exemptions-section" id="exemptionsSection">
+            <div class="section-header" id="exemptionsHeader" onclick="toggleExemptionsPanel()" style="cursor: pointer;">
+                <h2><i class="fas fa-user-check"></i> İzinli Kullanıcı Yönetimi</h2>
+                <i class="fas fa-chevron-down chevron-icon" id="exemptionsChevron"></i>
+            </div>
+
+            <div id="exemptionsSectionBody" class="section-body collapsed">
+                <p style="color: rgba(255, 255, 255, 0.7); font-size: 14px; margin-bottom: 15px;">
+                    Paylaşım linkine özel izinli kullanıcıları buradan görüntüleyebilir, ekleyebilir ve kaldırabilirsiniz.
+                </p>
+                <div style="margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+                    <input type="text" id="exemptionSearch" placeholder="Link veya kullanici ara..." style="max-width: 220px; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(196, 149, 106, 0.2); background: rgba(196, 149, 106, 0.05); color: var(--foreground);">
+                    <select id="exemptionPageSize" style="padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(196, 149, 106, 0.2); background: rgba(196, 149, 106, 0.05); color: var(--foreground);">
+                        <option value="10">10</option>
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
+                    </select>
+                    <span style="color: var(--muted-foreground); font-size: 13px;" id="exemptionPaginationInfo"></span>
+                    <button type="button" class="btn" id="exemptionPrevPage" style="padding: 8px 14px;"><i class="fas fa-chevron-left"></i></button>
+                    <button type="button" class="btn" id="exemptionNextPage" style="padding: 8px 14px;"><i class="fas fa-chevron-right"></i></button>
+                    <a href="/admin/export_exemptions?format=json" download="exemptions.json" class="btn" style="text-decoration: none;"><i class="fas fa-download"></i> İzinli JSON</a>
+                    <a href="/admin/export_exemptions?format=csv" download="exemptions.csv" class="btn" style="text-decoration: none;"><i class="fas fa-file-csv"></i> İzinli CSV</a>
+                </div>
+
+                <form id="addExemptionForm" class="inline-form" style="margin-bottom: 18px;">
+                    <input type="text" id="exemption_post_link" placeholder="Paylaşım linki" required>
+                    <input type="text" id="exemption_username" placeholder="Kullanıcı adı (örn: ornek_kullanici)" required>
+                    <button type="submit" class="btn btn-success"><i class="fas fa-plus"></i> Ekle</button>
+                </form>
+
+                <div class="loading" id="exemptionsLoading">
+                    <i class="fas fa-spinner"></i>
+                    <p>İzinli kullanıcılar yükleniyor...</p>
+                </div>
+
+                <div id="exemptionsList" class="exemption-grid"></div>
+            </div>
+        </div>
+
+        <div class="global-exemption-section" id="globalExemptionSection">
+            <div class="section-header" id="globalExemptionHeader" onclick="toggleGlobalExemptionPanel()" style="cursor: pointer;">
+                <h2><i class="fas fa-shield-alt"></i> Genel Muaf Liste</h2>
+                <span style="color: var(--muted-foreground); font-size: 13px;" id="globalExemptionCount"></span>
+                <i class="fas fa-chevron-down chevron-icon" id="globalExemptionChevron"></i>
+            </div>
+            <div id="globalExemptionBody" class="section-body collapsed">
+                <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                    Bu listedeki kullanıcılar <strong>TÜM</strong> kontrollerde muaf sayılır. 
+                    Hiçbir yorum kontrolünde eksik olarak göstermez.
+                </p>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                    <input type="text" id="global_exemption_username" placeholder="Kullanıcı adı (örn: ornek_kullanici)" style="max-width: 280px; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(196, 149, 106, 0.2); background: rgba(196, 149, 106, 0.05); color: var(--foreground);">
+                    <button type="button" class="btn btn-success" onclick="addGlobalExemption()">
+                        <i class="fas fa-plus me-1"></i> Muaf Ekle
+                    </button>
+                </div>
+                <div class="loading" id="globalExemptionsLoading">
+                    <i class="fas fa-spinner"></i>
+                    <p>Yükleniyor...</p>
+                </div>
+                <div id="globalExemptionsList" style="display: flex; flex-wrap: wrap; gap: 8px;"></div>
+            </div>
+        </div>
+
+        <div class="automation-section" id="automationSection">
+            <div class="section-header" id="automationHeader" onclick="toggleAutomationPanel()" style="cursor: pointer;">
+                <h2><i class="fas fa-robot"></i> Grup Kontrol Otomasyonu (Beta)</h2>
+                <i class="fas fa-chevron-down chevron-icon" id="automationChevron"></i>
+            </div>
+            <div id="automationBody" class="section-body collapsed">
+                <p style="color: var(--text-secondary); margin-bottom: 15px; font-size: 14px;">
+                    <i class="fas fa-info-circle"></i> Bu özellik, grupları belirlediğiniz "GMT+3" saatinde otomatik tarar, dünün/bugünün gönderilerine eksikleri çıkarır ve doğrudan <b>gruba yazar</b>. Bu riskli bir işlemdir (SPAM filtresi tetiklenebilir). Lütfen dikkatli kullanın!
+                </p>
+
+                <div style="background: rgba(0,0,0,0.2); padding: 15px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); margin-bottom: 20px;">
+                    <h4 style="color: var(--accent-primary); margin-bottom: 15px; font-size: 15px;"><i class="fas fa-cog me-2"></i> Global Otomasyon Ayarları</h4>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="color:rgba(255,255,255,0.8); font-size:13px; display:block; margin-bottom:5px;"><i class="fas fa-clock me-1"></i> Çalışma Saatleri (Örn: 10:00, 15:00, 20:00)</label>
+                        <input type="text" id="global_auto_times" placeholder="10:00, 15:00" style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#fff; padding:8px 12px; border-radius:8px; width:100%; max-width: 400px;">
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
+                        <label style="color:rgba(255,255,255,0.8); font-size:13px;"><i class="fas fa-paper-plane me-1"></i> Eksik Listesini Gruba At:</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="global_send_group" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="color:rgba(255,255,255,0.8); font-size:13px; display:block; margin-bottom:5px;"><i class="fas fa-comment-alt me-1"></i> Gruba Atılacak Uyarı Mesaj Şablonu:</label>
+                        <textarea id="global_auto_template" rows="3" style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#fff; padding:8px 12px; border-radius:8px; width:100%; resize:vertical;">@everyone merhaba arkadaşlar eksik listesindeki tüm arkadaşlarımıza dm yazdık dönüş yapmayanları aramızdan çıkarmak durumunda kalacağız.</textarea>
+                    </div>
+
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px; margin-top: 25px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+                        <label style="color:rgba(255,255,255,0.8); font-size:13px;"><i class="fas fa-envelope me-1"></i> Eksiklere Tek Tek DM At:</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="global_send_dm_to_missing" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="color:rgba(255,255,255,0.8); font-size:13px; display:block; margin-bottom:5px;"><i class="fas fa-comment-dots me-1"></i> Eksiklere Atılacak DM Şablonu:</label>
+                        <textarea id="global_dm_template" rows="2" style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#fff; padding:8px 12px; border-radius:8px; width:100%; resize:vertical;">Merhaba, {grup_ismi} grubumuzda eksiğiniz bulunmaktadır. Lütfen dönüş yapalım..</textarea>
+                    </div>
+
+                    <div style="margin-bottom: 15px; margin-top: 25px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+                        <label style="color:rgba(255,255,255,0.8); font-size:13px; display:block; margin-bottom:5px;">
+                            <i class="fas fa-bell me-1"></i> Admin (Size Gelen) Bildirim Şablonu:
+                        </label>
+                        <p style="font-size:11px; color:rgba(255,255,255,0.5); margin-bottom:8px;">
+                            Kullanabileceğiniz etiketler: <code style="color:#a78bfa;">{grup_ismi}</code>, <code style="color:#a78bfa;">{post_url}</code>, <code style="color:#a78bfa;">{eksik_sayisi}</code>, <code style="color:#a78bfa;">{toplam_uye}</code>, <code style="color:#a78bfa;">{saat}</code>, <code style="color:#a78bfa;">{post_tarihi}</code>, <code style="color:#a78bfa;">{eksik_listesi}</code>
+                        </p>
+                        <textarea id="global_admin_notify_template" rows="5" style="background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); color:#fff; padding:8px 12px; border-radius:8px; width:100%; resize:vertical;">✅ Otomasyon tamamlandı!
+
+📌 Grup: {grup_ismi}
+🔗 Post: {post_url}
+📅 Paylaşım Tarihi: {post_tarihi}
+
+👥 Toplam üye: {toplam_uye}
+❌ Eksik: {eksik_sayisi}
+⏰ Saat: {saat}</textarea>
+                    </div>
+
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-success" onclick="saveGlobalAutomationSettings()">
+                            <i class="fas fa-save me-1"></i> Global Ayarları Kaydet
+                        </button>
+                        <button type="button" class="btn btn-primary" onclick="liveTestAutomation()" style="background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.4);color:#c4b5fd;">
+                            <i class="fas fa-bolt me-1"></i> Tüm Aktif Grupları Canlı Test Et
+                        </button>
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center;">
+                    <button type="button" class="btn btn-warning" id="globalAutomationToggleBtn" onclick="toggleGlobalAutomation()">
+                        <i class="fas fa-power-off"></i> <span>Durumu Alınıyor...</span>
+                    </button>
+                    <button type="button" class="btn btn-primary" onclick="loadAutomationGroups()" id="loadAutomationBtn">
+                        <i class="fas fa-sync-alt me-1"></i> Grupları Listele
+                    </button>
+                    <span id="automationStatus" style="color: var(--success-color); display: none; align-items: center; gap: 6px;"><i class="fas fa-check-circle"></i> Yüklendi</span>
+                </div>
+                
+                <div class="loading" id="automationLoading" style="display: none;">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <p style="margin-top: 5px;">Instagram'dan gruplar çekiliyor, lütfen bekleyin...</p>
+                </div>
+                
+                <div id="automationList" class="exemption-grid">
+                    <!-- Gruplar buraya render edilecek -->
+                </div>
+            </div>
+        </div>
+
+        <div class="spam-report-section" id="spamReportSection">
+            <div class="section-header" id="spamReportHeader" onclick="toggleSpamReportPanel()" style="cursor: pointer;">
+                <h2><i class="fas fa-chart-line"></i> Yorum Spam & Puanlama Raporu</h2>
+                <i class="fas fa-chevron-down chevron-icon" id="spamReportChevron"></i>
+            </div>
+            <div id="spamReportBody" class="section-body collapsed">
+                <p style="color: var(--text-secondary); margin-bottom: 15px; font-size: 14px;">
+                    <i class="fas fa-info-circle"></i> Bu alan, kontrol edilen paylaşımlarda gruptaki üyelerin yaptıkları yorumların spam/bot puanlarını analiz eder. Üyelerin detaylarını görmek için isimlerine tıklayabilirsiniz.
+                </p>
+
+                <!-- Group Selector for Spam Report -->
+                <div style="margin-bottom: 20px; position: relative; z-index: 10060;">
+                    <label style="color:rgba(255,255,255,0.8); font-size:13px; display:block; margin-bottom:8px;"><i class="fas fa-users me-1"></i> Raporu Görüntülenecek Grubu Seçin:</label>
+                    <div class="custom-dropdown" id="spamReportGroupDropdown" style="max-width: 400px;">
+                        <button type="button" class="dropdown-trigger" id="spamReportDropdownTrigger" onclick="toggleSpamDropdown()">
+                            <span class="dropdown-text" id="spamReportGroupDropdownText">Grup Seçin...</span>
+                            <i class="fas fa-chevron-down dropdown-arrow"></i>
+                        </button>
+                        <div class="dropdown-menu" id="spamReportDropdownMenu">
+                            <input type="text" class="dropdown-search" placeholder="Grup ara..." onkeyup="filterSpamDropdown(this.value)">
+                            <div class="dropdown-options" id="spamReportGroupDropdownOptions">
+                                <!-- Gruplar dinamik yüklenecek -->
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Gizli input: JS seçilen değeri buraya yazacak -->
+                    <input type="hidden" id="spamReportGroupSelect" onchange="loadGroupSpamReport()">
+                </div>
+
+                <!-- Member Search Input (Initially Hidden) -->
+                <div id="spamReportMemberSearchWrapper" style="display: none; margin-bottom: 20px; max-width: 400px;">
+                    <label style="color:rgba(255,255,255,0.8); font-size:13px; display:block; margin-bottom:8px;"><i class="fas fa-search me-1"></i> Üye Ara (Kullanıcı Adı):</label>
+                    <input type="text" id="spamReportMemberSearch" placeholder="Kullanıcı adı yazın..." onkeyup="filterSpamReportTable(this.value)" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 10px 14px; border-radius: 12px; width: 100%; outline: none; box-sizing: border-box;">
+                </div>
+
+                <div class="loading" id="spamReportLoading" style="display: none;">
+                    <i class="fas fa-spinner fa-spin"></i>
+                    <p style="margin-top: 5px;">Rapor hazırlanıyor, lütfen bekleyin...</p>
+                </div>
+
+                <!-- Spam Scoring Table -->
+                <div class="spam-table-container" id="spamReportTableWrapper" style="display: none;">
+                    <table class="spam-table">
+                        <thead>
+                            <tr>
+                                <th style="text-align: left;">Kullanıcı Adı</th>
+                                <th style="text-align: center;">Toplam Yorum</th>
+                                <th style="text-align: center;">Format İhlali</th>
+                                <th style="text-align: center;">Ort. Spam Puanı</th>
+                            </tr>
+                        </thead>
+                        <tbody id="spamReportTableBody">
+                            <!-- Veriler buraya yüklenecek -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div id="spamReportEmptyMsg" style="color: var(--text-secondary); text-align: center; padding: 30px; display: none;">
+                    <i class="fas fa-exclamation-triangle" style="font-size: 24px; margin-bottom: 10px; color: var(--accent-primary);"></i>
+                    <p>Bu grup için henüz kaydedilmiş yorum verisi bulunmamaktadır.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="audit-section" id="auditSection">
+            <div class="section-header" id="auditHeader" onclick="toggleAuditPanel()" style="cursor: pointer;">
+                <h2><i class="fas fa-history"></i> Son İşlemler (Audit Log)</h2>
+                <i class="fas fa-chevron-down chevron-icon" id="auditChevron"></i>
+            </div>
+            <div id="auditBody" class="section-body collapsed">
+                <div class="loading" id="auditLoading"><i class="fas fa-spinner"></i><p>Yükleniyor...</p></div>
+                <div id="auditList" style="max-height: 400px; overflow-y: auto;"></div>
+            </div>
+        </div>
+        
+        <div class="tokens-list" id="tokensListSection">
+            <div class="section-header" id="tokensListHeader" onclick="toggleTokensListPanel()" style="cursor: pointer;">
+                <h2><i class="fas fa-list"></i> Token Listesi</h2>
+                <i class="fas fa-chevron-down chevron-icon" id="tokensListChevron"></i>
+            </div>
+
+            <div id="tokensListBody" class="section-body collapsed">
+                <div class="tokens-toolbar" style="margin-top: 10px; margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+                    <input type="text" id="tokenSearch" placeholder="Kullanici adi veya ad ara..." style="max-width: 220px; padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(196, 149, 106, 0.2); background: rgba(196, 149, 106, 0.05); color: var(--foreground); box-sizing: border-box; height: 38px; margin: 0; outline: none;">
+                    <select id="tokenPageSize" style="padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(196, 149, 106, 0.2); background: rgba(196, 149, 106, 0.05); color: var(--foreground); box-sizing: border-box; height: 38px; margin: 0; outline: none;">
+                        <option value="10">10</option>
+                        <option value="25" selected>25</option>
+                        <option value="50">50</option>
+                    </select>
+                    <span style="color: var(--muted-foreground); font-size: 13px;" id="tokenPaginationInfo"></span>
+                    <button type="button" class="btn" id="tokenPrevPage"><i class="fas fa-chevron-left"></i></button>
+                    <button type="button" class="btn" id="tokenNextPage"><i class="fas fa-chevron-right"></i></button>
+                    <button type="button" class="btn" id="showHiddenBtn" onclick="toggleHiddenTokens()">
+                        <i class="fas fa-eye-slash"></i>
+                        <span id="showHiddenText">Gizlenenleri G&#246;r</span>
+                        <span class="hidden-count" id="hiddenCount" style="margin-left: 5px; background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px; font-size: 11px; display: inline-flex; align-items: center; justify-content: center;">0</span>
+                    </button>
+                    <input type="file" id="importJsonInput" accept=".json" style="display: none;" onchange="handleImportJson(event)">
+                    <button type="button" class="btn" onclick="document.getElementById('importJsonInput').click()"><i class="fas fa-upload"></i> İçeri Aktar</button>
+                    <a href="/admin/export_tokens?format=json&include_deleted=true" download="tokens.json" class="btn" style="text-decoration: none;"><i class="fas fa-download"></i> Token JSON</a>
+                    <a href="/admin/export_tokens?format=csv&include_deleted=true" download="tokens.csv" class="btn" style="text-decoration: none;"><i class="fas fa-file-csv"></i> Token CSV</a>
+                </div>
+                <div class="loading" id="loading">
+                    <i class="fas fa-spinner"></i>
+                    <p>Yükleniyor...</p>
+                </div>
+                <div id="tokensList"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Düzenleme Modalı -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-edit"></i> Token Düzenle</h2>
+                <button type="button" class="modal-close" onclick="closeEditModal()">×</button>
+            </div>
+            
+            <form id="editTokenForm">
+                <input type="hidden" id="edit_username">
+                
+                <div class="form-group">
+                    <label><i class="fas fa-user"></i> Kullanıcı Adı</label>
+                    <input type="text" id="edit_username_display" disabled style="opacity: 0.6;">
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit_token"><i class="fas fa-key"></i> Token (Bearer Token)</label>
+                    <textarea id="edit_token" name="token" required placeholder="Bearer IGT:2:..."></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit_android_id"><i class="fas fa-mobile-alt"></i> Android ID</label>
+                    <input type="text" id="edit_android_id" name="android_id" required placeholder="3724108ca33e7977">
+                </div>
+
+                <div class="form-group">
+                    <label for="edit_device_id"><i class="fas fa-fingerprint"></i> Device ID</label>
+                    <input type="text" id="edit_device_id" name="device_id" required placeholder="550e8400-e29b-41d4-a716-446655440000">
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit_password"><i class="fas fa-lock"></i> Şifre</label>
+                    <input type="password" id="edit_password" name="password" required placeholder="Şifrenizi girin">
+                </div>
+
+                <div class="form-group">
+                    <label for="edit_user_agent"><i class="fas fa-browser"></i> User Agent</label>
+                    <textarea id="edit_user_agent" name="user_agent" required placeholder="Instagram 321.0.0.34.111..."></textarea>
+                </div>
+                
+                <div style="display: flex; gap: 10px;">
+                    <button type="submit" class="btn"><i class="fas fa-save"></i> Kaydet</button>
+                    <button type="button" class="btn btn-danger" onclick="closeEditModal()"><i class="fas fa-times"></i> İptal</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Sonuc Modali -->
+    <div id="successModal" class="success-modal" onclick="closeSuccessModal()">
+        <div class="success-modal-content" onclick="event.stopPropagation()">
+            <div class="success-icon" id="resultIcon">
+                <i class="fas fa-check" id="resultIconInner"></i>
+            </div>
+            <div class="success-title" id="resultTitle"></div>
+            <div class="success-detail" id="resultDetail"></div>
+            <button type="button" class="success-close-btn" id="resultCloseBtn" onclick="closeSuccessModal()">Tamam</button>
+        </div>
+    </div>
+
+    <!-- Tekrar giris – eksik alanlar modal (sadece eksik olanlar gosterilir) -->
+    <div id="reloginFieldsModal" class="modal" onclick="if (event.target.id === 'reloginFieldsModal') closeReloginFieldsModal();">
+        <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 480px;">
+            <div class="modal-header">
+                <h2 style="color: #fff;"><i class="fas fa-edit"></i> Eksik Bilgiler</h2>
+                <button type="button" class="modal-close" onclick="closeReloginFieldsModal()">×</button>
+            </div>
+            <p id="reloginFieldsMessage" style="color: rgba(255,255,255,0.9); margin-bottom: 14px; font-size: 14px;"></p>
+            <div id="reloginFieldsForm"></div>
+            <div style="display: flex; gap: 10px; margin-top: 16px;">
+                <button type="button" class="btn" onclick="closeReloginFieldsModal()">Iptal</button>
+                <button type="button" class="btn" onclick="submitReloginFields()"><i class="fas fa-sync-alt"></i> Kaydet ve Tekrar Giris Yap</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- User Spam Comment Details Modal -->
+    <div id="userSpamDetailsModal" class="modal" onclick="if (event.target.id === 'userSpamDetailsModal') closeUserSpamModal();">
+        <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2 style="color: #fff;"><i class="fas fa-chart-bar"></i> Yorum Detayları: @<span id="spamModalUsername"></span></h2>
+                <button type="button" class="modal-close" onclick="closeUserSpamModal()">×</button>
+            </div>
+            <div style="max-height: 400px; overflow-y: auto; margin-top: 15px;" id="spamModalCommentsList">
+                <!-- Yorum detayları buraya yüklenecek -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Audit Post Details Modal -->
+    <div id="auditPostDetailsModal" class="modal" onclick="if (event.target.id === 'auditPostDetailsModal') closeAuditPostDetailsModal();" style="z-index: 21000;">
+        <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 500px; padding: 28px;">
+            <div class="modal-header d-flex justify-content-between align-items-center mb-4" style="border-bottom: 1px solid rgba(196, 149, 106, 0.15); padding-bottom: 14px; margin-top: 0;">
+                <h3 style="color: var(--accent-caramel); font-size: 20px; font-weight: 700; margin: 0;"><i class="fas fa-info-circle me-2"></i>Paylaşım Detayları</h3>
+                <button type="button" class="modal-close" onclick="closeAuditPostDetailsModal()">×</button>
+            </div>
+            
+            <div class="modal-body" style="color: var(--foreground); font-size: 14px; padding: 0;">
+                <!-- Loading state inside modal -->
+                <div id="auditPostDetailsLoading" class="text-center py-4">
+                    <i class="fas fa-spinner fa-spin fa-2x" style="color: var(--accent-caramel);"></i>
+                    <p style="margin-top: 10px; color: var(--muted-foreground);">Gönderi detayları yükleniyor...</p>
+                </div>
+                
+                <!-- Content state -->
+                <div id="auditPostDetailsContent" style="display: none;">
+                    <div class="d-flex align-items-center mb-3" style="background: rgba(196, 149, 106, 0.05); border: 1px solid rgba(196, 149, 106, 0.15); padding: 12px 16px; border-radius: 12px; gap: 15px;">
+                        <i class="fas fa-user-circle" style="font-size: 32px; color: var(--accent-caramel);"></i>
+                        <div>
+                            <div style="font-weight: 700; color: #fff; font-size: 15px;" id="auditModalPostOwner">@username</div>
+                            <div style="font-size: 12px; color: var(--muted-foreground);" id="auditModalPostOwnerFullname">Ad Soyad</div>
+                        </div>
+                    </div>
+
+                    <div style="display: flex; gap: 12px; margin-bottom: 20px;">
+                        <div style="flex: 1; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); padding: 14px; border-radius: 12px; text-align: center;">
+                            <div style="color: var(--accent-caramel); font-size: 20px; font-weight: 700; margin-bottom: 4px;" id="auditModalPostLikes">0</div>
+                            <div style="color: var(--muted-foreground); font-size: 12px; font-weight: 500;"><i class="fas fa-heart me-1" style="color: #ef4444;"></i>Beğeni</div>
+                        </div>
+                        <div style="flex: 1; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); padding: 14px; border-radius: 12px; text-align: center;">
+                            <div style="color: var(--accent-caramel); font-size: 20px; font-weight: 700; margin-bottom: 4px;" id="auditModalPostComments">0</div>
+                            <div style="color: var(--muted-foreground); font-size: 12px; font-weight: 500;"><i class="fas fa-comment me-1" style="color: #3b82f6;"></i>Yorum</div>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 20px;">
+                        <label style="font-weight: 600; color: var(--accent-caramel); display: block; margin-bottom: 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;"><i class="fas fa-quote-left me-1"></i>Paylaşım Açıklaması:</label>
+                        <div id="auditModalPostCaption" style="background: rgba(0, 0, 0, 0.25); border: 1px solid var(--border); border-radius: 12px; padding: 14px; max-height: 150px; overflow-y: auto; color: rgba(255,255,255,0.95); font-style: italic; line-height: 1.6; font-size: 13px; white-space: pre-wrap; word-break: break-word;"></div>
+                    </div>
+
+                    <div style="text-align: center; margin-top: 24px;">
+                        <a id="auditModalPostLinkBtn" href="#" target="_blank" class="btn btn-primary" style="background: var(--accent-caramel); border-color: var(--accent-caramel); color: #0d0a08; font-weight: 600; padding: 10px 24px; border-radius: 12px; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; transition: all 0.2s;">
+                            <i class="fas fa-external-link-alt"></i>Instagram'da Göster
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Bottom Navigation -->
+    <nav class="mobile-bottom-nav">
+        <a href="/" class="nav-item">
+            <i class="fas fa-home"></i>
+            <span>Anasayfa</span>
+        </a>
+        <a href="/token_al" class="nav-item">
+            <i class="fas fa-key"></i>
+            <span>Token Al</span>
+        </a>
+        <a href="/admin" class="nav-item active">
+            <i class="fas fa-user-shield"></i>
+            <span>Admin Panel</span>
+        </a>
+    </nav>
+
+    <script src="{{ url_for('static', filename='js/admin.js') }}?v={{ range(1, 99999) | random }}"></script>
+
+    <!-- Page Transition Script -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('csrf_expired')) {
+                setTimeout(function() {
+                    alert("Güvenlik anahtarınız yenilendi, lütfen işlemi tekrar deneyin.");
+                }, 600);
+            }
+
+            document.querySelectorAll('a').forEach(link => {
+                link.addEventListener('click', function(e) {
+                    if (this.target === '_blank' || !this.href || this.href.startsWith('javascript:') || this.getAttribute('href').startsWith('#') || this.hasAttribute('download')) return;
+                    if (this.hostname === window.location.hostname) {
+                        e.preventDefault();
+                        const targetUrl = this.href;
+                        document.body.classList.add('page-transitioning-out');
+                        setTimeout(() => {
+                            window.location.href = targetUrl;
+                        }, 350);
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,27 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Databases and keys
+*.db
+*.db3
+*.sqlite
+secret.key
+automations.json
+
+# Zip files and archives
+*.zip
+*.tar.gz
+*.rar
+
+# Environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE files
+.vscode/
+.idea/

@@ -1,0 +1,174 @@
+:root {
+    --background: #0d0a08;
+    --foreground: #f5ede4;
+    --card: rgba(22, 17, 13, 0.88);
+    --border: rgba(139, 109, 78, 0.15);
+    --ring: rgba(196, 149, 106, 0.25);
+    --radius: 1rem;
+    --glass-blur: blur(20px);
+    --shadow-premium: 0 16px 48px rgba(0, 0, 0, 0.4);
+    --accent-caramel: #c4956a;
+    --muted-foreground: #a89585;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+body {
+    font-family: 'Quicksand', sans-serif;
+    background-color: var(--background);
+    color: var(--foreground);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+body.page-transitioning-out {
+    animation: pageTransitionOut 0.4s cubic-bezier(0.8, 0.2, 0.8, 1) both;
+}
+
+@keyframes pageTransitionIn {
+    from { opacity: 0; filter: blur(24px); }
+    to { opacity: 1; filter: blur(0); }
+}
+
+@keyframes pageTransitionOut {
+    from { opacity: 1; filter: blur(0); }
+    to { opacity: 0; filter: blur(24px); }
+}
+
+.container { width: 100%; max-width: 100%; padding: 0; display: flex; justify-content: center; }
+.row { width: 100%; margin: 0; justify-content: center; }
+.row > div { display: flex; justify-content: center; }
+
+
+
+.login-card {
+    background: var(--card);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    border-radius: 24px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-premium);
+    padding: 48px 40px;
+    max-width: 420px;
+    width: 100%;
+    position: relative;
+}
+
+.login-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent-caramel), transparent);
+}
+
+.login-card h2 {
+    color: var(--foreground);
+    font-weight: 600;
+    margin-bottom: 30px;
+    font-size: 28px;
+    text-align: center;
+}
+
+.form-label {
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 500;
+    margin-bottom: 8px;
+    font-size: 14px;
+}
+
+.form-control {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #fff;
+    border-radius: 12px;
+    padding: 12px 16px;
+    transition: all 0.3s ease;
+}
+
+
+.form-control:focus {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: rgba(255, 255, 255, 0.3);
+    box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.1);
+    color: #fff;
+    outline: none;
+}
+
+.form-control::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.btn-primary {
+    background: rgba(196, 149, 106, 0.12);
+    border: 1px solid rgba(196, 149, 106, 0.25);
+    border-radius: 14px;
+    padding: 14px;
+    font-weight: 600;
+    color: var(--foreground);
+    transition: all 0.25s ease;
+}
+
+.btn-primary:hover {
+    background: rgba(196, 149, 106, 0.18);
+    transform: translateY(-2px);
+    border-color: rgba(196, 149, 106, 0.4);
+}
+
+.btn-primary:focus, .btn-primary.focus {
+    background: rgba(196, 149, 106, 0.16);
+    border-color: rgba(196, 149, 106, 0.45);
+    box-shadow: 0 0 0 3px rgba(196, 149, 106, 0.12);
+    outline: none;
+}
+
+.btn-primary:active, .btn-primary.active {
+    background: rgba(196, 149, 106, 0.22) !important;
+    border-color: rgba(196, 149, 106, 0.5) !important;
+    transform: translateY(0);
+}
+
+.btn-primary:disabled, .btn-primary.disabled {
+    background: rgba(196, 149, 106, 0.05) !important;
+    border-color: rgba(139, 109, 78, 0.1) !important;
+    color: var(--muted-foreground) !important;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+    opacity: 0.5;
+}
+
+
+.alert-danger {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 12px;
+    color: rgba(239, 68, 68, 1);
+    font-size: 14px;
+    padding: 12px 15px;
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 14px;
+    font-weight: 600;
+    color: #fff;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    display: block;
+    text-align: center;
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: #fff;
+}
+
+
+}
