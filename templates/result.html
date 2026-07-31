@@ -616,7 +616,7 @@
             owner_fullname: "{{ item.owner_fullname or '' }}",
             like_count: {{ item.like_count or 0 }},
             comment_count: {{ item.comment_count or 0 }},
-            caption: `{{ (item.caption or '') | replace('\\', '\\\\') | replace('`', '\\`') | replace('$', '\\$') }}`,
+            caption: {{ (item.caption or '') | tojson | safe }},
             link: "{{ item.post_link }}"
         };
         {% endfor %}

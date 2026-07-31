@@ -49,6 +49,29 @@ def set_db_value(key, value):
     finally:
         conn.close()
 
+def clean_surrogates(text):
+    if not isinstance(text, str):
+        return text
+    try:
+        # Pair surrogate characters correctly
+        return text.encode('utf-16', 'surrogatepass').decode('utf-16')
+    except Exception:
+        try:
+            return text.encode('utf-8', 'ignore').decode('utf-8')
+        except Exception:
+            return "".join(c for c in text if not (0xD800 <= ord(c) <= 0xDFFF))
+
+def clean_data_recursive(data):
+    if isinstance(data, dict):
+        return {k: clean_data_recursive(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_data_recursive(x) for x in data]
+    elif isinstance(data, str):
+        return clean_surrogates(data)
+    else:
+        return data
+
+
 
 @main_bp.route("/api/get_groups", methods=["GET"])
 def get_groups():
@@ -408,6 +431,7 @@ def run_manual_control_async(post_code, only_missing=False):
 
     try:
         inputs = json.loads(inputs_json)
+        inputs = clean_data_recursive(inputs)
         link = inputs.get("link")
         grup_uye = inputs.get("grup_uye")
         thread_id = inputs.get("thread_id")
@@ -484,6 +508,7 @@ def result_page_new(post_code):
             return redirect("/")
         try:
             result = json.loads(result_json)
+            result = clean_data_recursive(result)
         except Exception:
             return redirect("/")
             
@@ -529,6 +554,7 @@ def task_status_route(post_code):
         return jsonify({"status": "not_found", "progress": 0, "error": "Görev bulunamadı"})
     try:
         data = json.loads(task_status_json)
+        data = clean_data_recursive(data)
         return jsonify(data)
     except Exception as e:
         return jsonify({"status": "failed", "progress": 100, "error": str(e)})
@@ -780,6 +806,7 @@ def cached_result():
     
     from app_core.storage import get_cached_run_result
     result = get_cached_run_result(thread_id, date_str)
+    result = clean_data_recursive(result)
     if not result:
         return redirect("/")
         
