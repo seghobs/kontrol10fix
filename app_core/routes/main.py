@@ -797,4 +797,19 @@ def cached_result():
     )
 
 
+@main_bp.route("/debug_logs")
+def debug_logs():
+    import os
+    try:
+        log_path = "/var/log/kontrolyeni.pythonanywhere.com.error.log"
+        if os.path.exists(log_path):
+            with open(log_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                return "<pre>" + "".join(lines[-150:]) + "</pre>"
+        else:
+            return f"Log file not found at {log_path}"
+    except Exception as e:
+        return "Error reading log: " + str(e)
+
+
 
