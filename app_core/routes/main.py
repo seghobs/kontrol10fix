@@ -4,12 +4,14 @@ import random
 import time
 import datetime
 import pytz
+import threading
+import json
 from flask import Blueprint, jsonify, render_template, request, session, redirect, url_for
 from donustur import donustur
 from log_in import giris_yap, LoginError
 
 from app_core.instagram_api import get_post_sender, get_media_taken_at, get_post_details
-from app_core.storage import load_exemptions, save_exemptions, load_global_exemptions, add_audit_log
+from app_core.storage import load_exemptions, save_exemptions, load_global_exemptions, add_audit_log, _connect
 from app_core.token_service import (
     fetch_comments_with_failover,
     fetch_likers_with_failover,
@@ -23,6 +25,29 @@ from app_core.token_service import (
 logger = logging.getLogger(__name__)
 
 main_bp = Blueprint("main", __name__)
+
+def get_db_value(key):
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT value FROM key_value WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else None
+    except Exception as e:
+        logger.error(f"get_db_value error for {key}: {e}")
+        return None
+    finally:
+        conn.close()
+
+def set_db_value(key, value):
+    conn = _connect()
+    try:
+        conn.execute("INSERT OR REPLACE INTO key_value (key, value) VALUES (?, ?)", (key, str(value)))
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"set_db_value error for {key}: {e}")
+        return False
+    finally:
+        conn.close()
 
 
 @main_bp.route("/api/get_groups", methods=["GET"])
@@ -108,14 +133,14 @@ def clean_word_count(text):
     return len(words)
 
 
-def run_manual_control(link, grup_uye, thread_id, post_senders_raw, check_likes):
+def run_manual_control(link, grup_uye, thread_id, post_senders_raw, check_likes, only_missing=False, prev_result=None, progress_callback=None):
     active_working_token = get_working_active_token()
     if not active_working_token:
         raise ValueError("Tum hesaplar cikis yapmis gorunuyor. Lutfen admin panelden gecerli bir token girin.")
 
     grup_uye_kullanicilar = {normalize_username(u) for u in grup_uye.split() if u.strip()}
     
-    links_raw = link.split("\n")
+    links_raw = [l.strip().rstrip('/') for l in link.split("\n") if l.strip()]
     all_commented = set()
     user_missing_posts = {}  # {username: [post_link1, post_link2, ...]}
     user_comments_map = {}  # {username: [comment_text1, comment_text2, ...]}
@@ -133,13 +158,24 @@ def run_manual_control(link, grup_uye, thread_id, post_senders_raw, check_likes)
             post_senders[url] = normalize_username(sender)
     
     link_count = 0
-    for link_raw in links_raw:
-        link_single = link_raw.strip().rstrip('/')
-        if not link_single:
-            continue
-        
+    for link_single in links_raw:
+        # Eğer hızlı güncelleme aktifse ve bu linkin eksikleri önceden tamamlandıysa, sorguyu atla
+        if only_missing and prev_result:
+            prev_link_res = next((lr for lr in prev_result.get("links", []) if lr.get("post_link", "").strip().rstrip('/') == link_single), None)
+            if prev_link_res and not prev_link_res.get("eksikler"):
+                # Bu link zaten tamamlanmış, eski sonucu koru
+                link_results.append(prev_link_res)
+                link_count += 1
+                if progress_callback:
+                    progress_callback(link_count, len(links_raw), f"Gönderi {link_count}/{len(links_raw)} atlandı (Tamamlanmış)")
+                continue
+
+        link_count += 1
+        if progress_callback:
+            progress_callback(link_count, len(links_raw), f"Gönderi {link_count}/{len(links_raw)} sorgulanıyor...")
+            
         # Her link arasinda random bekleme (insan davranisi)
-        if link_count > 0:
+        if link_count > 1:
             delay = round(random.uniform(4.0, 9.0) + random.random(), 2)
             if delay > 10.0:
                 delay = round(delay - 1.0, 2)
@@ -149,8 +185,6 @@ def run_manual_control(link, grup_uye, thread_id, post_senders_raw, check_likes)
         working_token = get_working_active_token(skip_validation=True)
         if not working_token:
             raise ValueError("Aktif token bulunamadi veya tum tokenler expired. Lutfen admin panelden yeni token ekleyin.")
-        
-        link_count += 1
         
         media_id = donustur(link_single)
         if media_id is None:
@@ -358,77 +392,181 @@ def run_manual_control(link, grup_uye, thread_id, post_senders_raw, check_likes)
     }
 
 
-@main_bp.route("/result", methods=["GET"])
-def result_page():
-    # Eğer taze yönlendirmeyse, önbellekten göster (Sayfa yüklenmesi hızlı olsun)
-    if session.get("is_fresh_redirect") == True:
-        session["is_fresh_redirect"] = False
-        session.modified = True
-        result = session.get("last_result")
-        if result:
-            return render_template(
-                "result.html",
-                links=result.get("links"),
-                all_commented=result.get("all_commented"),
-                group=result.get("group"),
-                user_missing_posts=result.get("user_missing_posts"),
-                duplicate_comment_users=result.get("duplicate_comment_users"),
-                invalid_comment_users=result.get("invalid_comment_users"),
-                user_comments=result.get("user_comments"),
-                thread_id=result.get("thread_id"),
-                check_likes=result.get("check_likes", False)
-            )
+def run_manual_control_async(post_code, only_missing=False):
+    import json
+    import traceback
+    
+    # 1. Girdileri veritabanından oku
+    inputs_json = get_db_value(f"manual_run_inputs_{post_code}")
+    if not inputs_json:
+        set_db_value(f"task_status_{post_code}", json.dumps({
+            "status": "failed",
+            "progress": 100,
+            "error": "Denetim girdileri veritabanında bulunamadı."
+        }))
+        return
 
-    # Eğer taze yönlendirme DEĞİLSE (kullanıcı F5 yapıp yenilediyse veya Chrome'u kapatıp açtıysa):
-    # İşlemi yeni baştan çalıştır!
-    inputs = session.get("last_inputs")
-    if not inputs:
+    try:
+        inputs = json.loads(inputs_json)
+        link = inputs.get("link")
+        grup_uye = inputs.get("grup_uye")
+        thread_id = inputs.get("thread_id")
+        post_senders_raw = inputs.get("post_senders_raw", [])
+        check_likes = inputs.get("check_likes", False)
+        
+        # Hızlı güncelleme için önceki sonuçları yükle
+        prev_result = None
+        if only_missing:
+            prev_result_json = get_db_value(f"manual_run_result_{post_code}")
+            if prev_result_json:
+                try:
+                    prev_result = json.loads(prev_result_json)
+                except Exception:
+                    pass
+
+        # İlerleme bildirim callback'i
+        def progress_cb(current, total, msg):
+            progress_percent = int((current / total) * 90) # Son %10'u tamamlama için ayır
+            set_db_value(f"task_status_{post_code}", json.dumps({
+                "status": "running",
+                "progress": max(5, progress_percent),
+                "message": msg,
+                "error": None
+            }))
+
+        # Kontrolü çalıştır
+        res_data = run_manual_control(
+            link=link,
+            grup_uye=grup_uye,
+            thread_id=thread_id,
+            post_senders_raw=post_senders_raw,
+            check_likes=check_likes,
+            only_missing=only_missing,
+            prev_result=prev_result,
+            progress_callback=progress_cb
+        )
+        
+        # Sonucu veritabanına kaydet
+        set_db_value(f"manual_run_result_{post_code}", json.dumps(res_data, ensure_ascii=False))
+        
+        # Görevi tamamlandı olarak işaretle
+        set_db_value(f"task_status_{post_code}", json.dumps({
+            "status": "completed",
+            "progress": 100,
+            "error": None
+        }))
+        
+    except Exception as e:
+        logger.exception("Arka planda manuel denetim hatası")
+        set_db_value(f"task_status_{post_code}", json.dumps({
+            "status": "failed",
+            "progress": 100,
+            "error": str(e)
+        }))
+
+
+@main_bp.route("/result/<post_code>", methods=["GET"])
+def result_page_new(post_code):
+    task_status_json = get_db_value(f"task_status_{post_code}")
+    if not task_status_json:
         return redirect("/")
         
     try:
-        # Sorguyu yeni baştan çalıştır!
-        res_data = run_manual_control(
-            link=inputs.get("link"),
-            grup_uye=inputs.get("grup_uye"),
-            thread_id=inputs.get("thread_id"),
-            post_senders_raw=inputs.get("post_senders_raw", []),
-            check_likes=inputs.get("check_likes", False)
-        )
-        # Yeni sonuçları hafızaya kaydet
-        session["last_result"] = res_data
-        session.modified = True
+        task_status = json.loads(task_status_json)
+    except Exception:
+        return redirect("/")
         
+    status = task_status.get("status")
+    
+    if status == "completed":
+        result_json = get_db_value(f"manual_run_result_{post_code}")
+        if not result_json:
+            return redirect("/")
+        try:
+            result = json.loads(result_json)
+        except Exception:
+            return redirect("/")
+            
         return render_template(
             "result.html",
-            links=res_data.get("links"),
-            all_commented=res_data.get("all_commented"),
-            group=res_data.get("group"),
-            user_missing_posts=res_data.get("user_missing_posts"),
-            duplicate_comment_users=res_data.get("duplicate_comment_users"),
-            invalid_comment_users=res_data.get("invalid_comment_users"),
-            user_comments=res_data.get("user_comments"),
-            thread_id=res_data.get("thread_id"),
-            check_likes=res_data.get("check_likes", False)
+            links=result.get("links"),
+            all_commented=result.get("all_commented"),
+            group=result.get("group"),
+            user_missing_posts=result.get("user_missing_posts"),
+            duplicate_comment_users=result.get("duplicate_comment_users"),
+            invalid_comment_users=result.get("invalid_comment_users"),
+            user_comments=result.get("user_comments"),
+            thread_id=result.get("thread_id"),
+            check_likes=result.get("check_likes", False),
+            post_code=post_code,
+            is_loading=False
         )
+        
+    elif status == "running":
+        return render_template(
+            "result.html",
+            is_loading=True,
+            progress=task_status.get("progress", 0),
+            message=task_status.get("message", "İşlem başlatılıyor..."),
+            post_code=post_code,
+            links=[]
+        )
+        
+    else: # failed
+        return render_template(
+            "result.html",
+            is_loading=False,
+            error_message=f"Hata oluştu: {task_status.get('error', 'Bilinmeyen hata')}",
+            post_code=post_code,
+            links=[]
+        )
+
+
+@main_bp.route("/api/task_status/<post_code>", methods=["GET"])
+def task_status_route(post_code):
+    task_status_json = get_db_value(f"task_status_{post_code}")
+    if not task_status_json:
+        return jsonify({"status": "not_found", "progress": 0, "error": "Görev bulunamadı"})
+    try:
+        data = json.loads(task_status_json)
+        return jsonify(data)
     except Exception as e:
-        logger.exception("Yenileme sırasındaki manuel kontrol hatasi")
-        # Hata durumunda son başarılı sonucu göstermeyi dene
-        result = session.get("last_result")
-        if result:
-            return render_template(
-                "result.html",
-                links=result.get("links"),
-                all_commented=result.get("all_commented"),
-                group=result.get("group"),
-                user_missing_posts=result.get("user_missing_posts"),
-                duplicate_comment_users=result.get("duplicate_comment_users"),
-                invalid_comment_users=result.get("invalid_comment_users"),
-                user_comments=result.get("user_comments"),
-                thread_id=result.get("thread_id"),
-                check_likes=result.get("check_likes", False),
-                error_message=f"Güncelleme sırasında hata oluştu, eski veriler gösteriliyor: {e}"
-            )
-        return redirect("/")
+        return jsonify({"status": "failed", "progress": 100, "error": str(e)})
+
+
+@main_bp.route("/api/recheck/<post_code>", methods=["POST"])
+def recheck_post(post_code):
+    data = request.get_json() or {}
+    only_missing = data.get("only_missing", False)
+    
+    # Girdilerin varlığını doğrula
+    inputs_json = get_db_value(f"manual_run_inputs_{post_code}")
+    if not inputs_json:
+        return jsonify({"success": False, "message": "Girdiler bulunamadı. Lütfen ana sayfadan tekrar gönderin."}), 400
+        
+    # Görevin zaten çalışıp çalışmadığını kontrol et
+    task_status_json = get_db_value(f"task_status_{post_code}")
+    if task_status_json:
+        try:
+            status_data = json.loads(task_status_json)
+            if status_data.get("status") == "running":
+                return jsonify({"success": False, "message": "Görev zaten çalışıyor."}), 400
+        except Exception:
+            pass
+            
+    # Durumu güncelle
+    set_db_value(f"task_status_{post_code}", json.dumps({
+        "status": "running",
+        "progress": 0,
+        "message": "Güncelleme başlatılıyor...",
+        "error": None
+    }))
+    
+    # Thread başlat
+    t = threading.Thread(target=run_manual_control_async, args=(post_code, only_missing), daemon=True)
+    t.start()
+    
+    return jsonify({"success": True})
 
 
 @main_bp.route("/", methods=["GET", "POST"])
@@ -450,27 +588,46 @@ def index():
         post_senders_raw = request.form.getlist("post_senders")
         check_likes = request.form.get("check_likes") == "on"
 
-        try:
-            # Kontrolü POST'tayken ilk kez çalıştır
-            res_data = run_manual_control(link, grup_uye, thread_id, post_senders_raw, check_likes)
-        except ValueError as ve:
-            return render_template("form.html", token_error_message=str(ve))
-        except Exception as e:
-            logger.exception("Manuel kontrol hatasi")
-            return render_template("form.html", token_error_message=f"Kontrol sırasında beklenmedik hata: {e}")
+        # Post kodunu ayıkla
+        import re
+        match = re.search(r"instagram\.com/(?:p|reel|tv)/([a-zA-Z0-9\-_]+)", link)
+        if not match:
+            return render_template("form.html", token_error_message="Geçersiz Instagram linki formatı.")
+        post_code = match.group(1)
 
-        # Kaydet ve yönlendir
-        session["last_inputs"] = {
+        # Girdileri kaydet
+        inputs = {
             "link": link,
             "grup_uye": grup_uye,
             "thread_id": thread_id,
             "post_senders_raw": post_senders_raw,
             "check_likes": check_likes
         }
-        session["last_result"] = res_data
-        session["is_fresh_redirect"] = True
-        session.modified = True
-        return redirect(url_for("main.result_page"))
+        set_db_value(f"manual_run_inputs_{post_code}", json.dumps(inputs))
+        
+        # Görev zaten çalışıyor mu?
+        is_running = False
+        task_status_json = get_db_value(f"task_status_{post_code}")
+        if task_status_json:
+            try:
+                status_data = json.loads(task_status_json)
+                if status_data.get("status") == "running":
+                    is_running = True
+            except Exception:
+                pass
+                
+        if not is_running:
+            # Thread başlat
+            set_db_value(f"task_status_{post_code}", json.dumps({
+                "status": "running",
+                "progress": 0,
+                "message": "Denetim başlatılıyor...",
+                "error": None
+            }))
+            t = threading.Thread(target=run_manual_control_async, args=(post_code, False), daemon=True)
+            t.start()
+
+        return redirect(url_for("main.result_page_new", post_code=post_code))
 
     refresh = request.args.get("refresh") == "1"
     link_param = request.args.get("link", "")

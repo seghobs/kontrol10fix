@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 def _connect():
-    conn = sqlite3.connect(DB_FILE)
+    conn = sqlite3.connect(DB_FILE, timeout=30.0)
     conn.row_factory = sqlite3.Row
     return conn
 

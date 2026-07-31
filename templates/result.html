@@ -61,10 +61,39 @@
         <div class="row justify-content-center">
             <div class="col-12 col-md-10 col-lg-8 col-xl-7">
                 <div class="result-card">
+                    {% if is_loading %}
+                    <div class="text-center py-5">
+                        <div class="mb-4">
+                            <i class="fas fa-mug-hot fa-spin-slow fa-4x" style="color: var(--accent-caramel); filter: drop-shadow(0 0 15px rgba(200, 122, 83, 0.45));"></i>
+                        </div>
+                        <h2 class="mb-3" style="color: var(--text-cream); font-weight: 600;">Denetim Sürüyor...</h2>
+                        <p class="text-muted mb-4" id="loading-message">{{ message }}</p>
+                        
+                        <!-- Progress Bar -->
+                        <div class="progress mb-4 shadow-sm" style="height: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 6px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.03); max-width: 400px; margin: 0 auto;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" 
+                                 id="loading-progress-bar"
+                                 style="width: {{ progress }}%; background-color: var(--accent-caramel); transition: width 0.4s ease;" 
+                                 aria-valuenow="{{ progress }}" aria-valuemin="0" aria-valuemax="100"></div>
+                        </div>
+                        <span class="badge badge-accent-outline px-3 py-2" id="loading-percent" style="font-size: 13px; font-weight: 600;">
+                            %{{ progress }} Tamamlandı
+                        </span>
+                    </div>
+                    {% else %}
                     <div class="text-center mb-4">
                         <h1 class="mb-2">
                             <i class="fas fa-user-minus me-2"></i>{% if check_likes %}Beğeni Durumu Özeti{% else %}Yorum Durumu Özeti{% endif %}
                         </h1>
+                        <!-- Hızlı Güncelle / Yeniden Tarama Butonları -->
+                        <div class="d-flex justify-content-center gap-2 mt-3 flex-wrap">
+                            <button type="button" class="btn btn-sm" onclick="triggerRecheck(true)" style="color: var(--accent-caramel); border: 1px solid rgba(196, 149, 106, 0.3); padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; background: rgba(196, 149, 106, 0.05); transition: all 0.2s;" onmouseover="this.style.borderColor='rgba(196, 149, 106, 0.6)'; this.style.background='rgba(196, 149, 106, 0.15)';" onmouseout="this.style.borderColor='rgba(196, 149, 106, 0.3)'; this.style.background='rgba(196, 149, 106, 0.05)';">
+                                <i class="fas fa-bolt me-1"></i> Hızlı Güncelle (Eksikler)
+                            </button>
+                            <button type="button" class="btn btn-sm" onclick="triggerRecheck(false)" style="color: var(--muted-foreground); border: 1px solid rgba(255, 255, 255, 0.1); padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; background: rgba(255, 255, 255, 0.02); transition: all 0.2s;" onmouseover="this.style.borderColor='rgba(255, 255, 255, 0.25)'; this.style.color='#fff'; this.style.background='rgba(255, 255, 255, 0.05)';" onmouseout="this.style.borderColor='rgba(255, 255, 255, 0.1)'; this.style.color='var(--muted-foreground)'; this.style.background='rgba(255, 255, 255, 0.02)';">
+                                <i class="fas fa-sync-alt me-1"></i> Tam Yeniden Tara
+                            </button>
+                        </div>
                         <!-- Paylaşım Değiştirme Butonu -->
                         <div id="togglePostSelectorBtnWrapper" style="display: none; margin-top: 10px;">
                             <button type="button" class="btn btn-sm" onclick="window.togglePostSelectorCard()" style="color: var(--accent-caramel); border: 1px dashed rgba(196, 149, 106, 0.25); padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 500; background: transparent; transition: all 0.2s;" onmouseover="this.style.borderColor='rgba(196, 149, 106, 0.5)'; this.style.background='rgba(196, 149, 106, 0.03)';" onmouseout="this.style.borderColor='rgba(196, 149, 106, 0.25)'; this.style.background='transparent';">
@@ -304,7 +333,7 @@
                         </div>
                     </div>
                     {% endif %}
-                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -492,6 +521,80 @@
     </div>
 
     <script>
+        window.postCode = "{{ post_code if post_code else '' }}";
+        
+        function triggerRecheck(onlyMissing) {
+            if (!window.postCode) return;
+            
+            const btnBolt = document.querySelector('button[onclick="triggerRecheck(true)"]');
+            const btnSync = document.querySelector('button[onclick="triggerRecheck(false)"]');
+            
+            if (btnBolt) btnBolt.disabled = true;
+            if (btnSync) btnSync.disabled = true;
+            
+            fetch(`/api/recheck/${window.postCode}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+                },
+                body: JSON.stringify({ only_missing: onlyMissing })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    window.location.reload();
+                } else {
+                    alert(data.message || "Güncelleme başlatılamadı.");
+                    if (btnBolt) btnBolt.disabled = false;
+                    if (btnSync) btnSync.disabled = false;
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                alert("İletişim hatası oluştu.");
+                if (btnBolt) btnBolt.disabled = false;
+                if (btnSync) btnSync.disabled = false;
+            });
+        }
+
+        {% if is_loading %}
+        document.addEventListener('DOMContentLoaded', () => {
+            const progressBar = document.getElementById('loading-progress-bar');
+            const loadingMsg = document.getElementById('loading-message');
+            const loadingPercent = document.getElementById('loading-percent');
+            
+            function pollStatus() {
+                fetch(`/api/task_status/${window.postCode}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        window.location.reload();
+                    } else if (data.status === 'running') {
+                        if (progressBar) {
+                            progressBar.style.width = data.progress + '%';
+                            progressBar.setAttribute('aria-valuenow', data.progress);
+                        }
+                        if (loadingMsg && data.message) {
+                            loadingMsg.textContent = data.message;
+                        }
+                        if (loadingPercent) {
+                            loadingPercent.textContent = `%${data.progress} Tamamlandı`;
+                        }
+                        setTimeout(pollStatus, 2000);
+                    } else {
+                        setTimeout(pollStatus, 2000);
+                    }
+                })
+                .catch(err => {
+                    console.error("Polling error:", err);
+                    setTimeout(pollStatus, 3000);
+                });
+            }
+            setTimeout(pollStatus, 1000);
+        });
+        {% endif %}
+
         window.resultThreadId = "{{ thread_id if thread_id else '' }}";
         window.checkedPostUrl = "{{ links[0].post_link if links and links|length > 0 else '' }}";
         window.userComments = {{ user_comments | tojson | safe if user_comments else '{}' }};
