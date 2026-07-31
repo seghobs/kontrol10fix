@@ -42,7 +42,15 @@
             }
             return originalFetch(input, init);
         };
-    </script>
+    <style>
+        @keyframes spinSlow {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .fa-spin-slow {
+            animation: spinSlow 3.5s linear infinite;
+        }
+    </style>
 </head>
 <body {% if rate_limited %}data-rate-limited="true"{% endif %}>
 
@@ -67,7 +75,7 @@
                             <i class="fas fa-mug-hot fa-spin-slow fa-4x" style="color: var(--accent-caramel); filter: drop-shadow(0 0 15px rgba(200, 122, 83, 0.45));"></i>
                         </div>
                         <h2 class="mb-3" style="color: var(--text-cream); font-weight: 600;">Denetim Sürüyor...</h2>
-                        <p class="text-muted mb-4" id="loading-message">{{ message }}</p>
+                        <p class="mb-4" id="loading-message" style="color: rgba(245, 235, 230, 0.6) !important; font-size: 15px; font-weight: 500;">{{ message }}</p>
                         
                         <!-- Progress Bar -->
                         <div class="progress mb-4 shadow-sm" style="height: 12px; background: rgba(255, 255, 255, 0.05); border-radius: 6px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.03); max-width: 400px; margin: 0 auto;">
