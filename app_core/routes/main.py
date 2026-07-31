@@ -812,4 +812,21 @@ def debug_logs():
         return "Error reading log: " + str(e)
 
 
+@main_bp.route("/debug_db/<post_code>")
+def debug_db(post_code):
+    try:
+        status_val = get_db_value(f"task_status_{post_code}")
+        result_val = get_db_value(f"manual_run_result_{post_code}")
+        inputs_val = get_db_value(f"manual_run_inputs_{post_code}")
+        return jsonify({
+            "post_code": post_code,
+            "task_status": json.loads(status_val) if status_val else None,
+            "manual_run_result_length": len(result_val) if result_val else 0,
+            "manual_run_result": json.loads(result_val) if result_val else None,
+            "manual_run_inputs": json.loads(inputs_val) if inputs_val else None
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
 
